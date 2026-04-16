@@ -1,15 +1,18 @@
 #include <Arduino.h>
-#include "config.h"
-#include "wifi_manager.h"
 #include "backend_client.h"
-
-unsigned long lastPostTime = 0;
+#include "wifi_manager.h"
+#include "config.h"
 
 void setup() {
   Serial.begin(115200);
   delay(1000);
 
+  initConfig();
+  Serial.print("DEVICE SERIAL: ");
+  Serial.println(DEVICE_SERIAL_NUMBER);
+
   WiFiManagerApp::begin();
+  BackendClient::begin();
 
   bool connected = WiFiManagerApp::connectToSavedWiFi();
   if (!connected) {
@@ -21,10 +24,6 @@ void loop() {
   WiFiManagerApp::handle();
 
   if (WiFiManagerApp::isConnected()) {
-    unsigned long now = millis();
-    if (now - lastPostTime >= POST_INTERVAL_MS) {
-      lastPostTime = now;
-      BackendClient::sendTelemetry();
-    }
+    BackendClient::handle();
   }
 }
