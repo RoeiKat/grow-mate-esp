@@ -20,6 +20,7 @@ extern const char* DEVICE_FIRMWARE_VERSION;
 // Network / setup portal
 // ---------------------------
 extern const char* AP_SSID;
+extern const char* PORTAL_HOSTNAME;
 extern const int BOOT_BUTTON_PIN;
 extern const unsigned long RESET_HOLD_TIME_MS;
 extern const unsigned long WIFI_CONNECT_TIMEOUT_MS;
@@ -59,3 +60,4 @@ extern const int WATER_LEVEL_VARIATION_PERCENT;
 String buildApiUrl(const char* path);
 void initConfig();
 String generateDeviceSerial();
+String getPortalBaseUrl();

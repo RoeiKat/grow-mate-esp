@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Grow Mate Pairing</title>
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 430px; margin: 30px auto; padding: 16px; background: #f6f6f6; color: #111; }
+    .card { background: #fff; padding: 20px; border-radius: 14px; box-shadow: 0 2px 12px rgba(0,0,0,0.08); }
+    h2 { margin-top: 0; }
+    p { color: #555; line-height: 1.4; }
+    .status { margin-top: 16px; padding: 14px; border-radius: 10px; background: #f3f3f3; }
+    .code { font-size: 32px; font-weight: bold; letter-spacing: 4px; }
+    .mono { font-family: monospace; word-break: break-all; }
+    button { width: 100%; box-sizing: border-box; padding: 12px; margin-top: 16px; border-radius: 10px; border: none; background: #111; color: white; cursor: pointer; font-size: 15px; }
+    .hint { font-size: 13px; color: #777; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2>Pair Your Grow Mate</h2>
+    <p>Once the device connects to Wi-Fi, the pairing code will appear here automatically.</p>
+
+    <div class="status">
+      <div><b>Device serial:</b> <span id="serial" class="mono">{{DEVICE_SERIAL}}</span></div>
+      <div><b>Portal address:</b> <span class="mono">{{PORTAL_URL}}</span></div>
+      <div><b>Wi-Fi status:</b> <span id="wifiStatus">Waiting...</span></div>
+      <div><b>Local IP:</b> <span id="localIp">-</span></div>
+      <div><b>Paired:</b> <span id="paired">No</span></div>
+      <div><b>Pairing code:</b> <span id="pairingCode" class="code">------</span></div>
+      <div><b>Refresh countdown:</b> <span id="countdown">--</span></div>
+      <div><b>Expires at:</b> <span id="expiresAt">-</span></div>
+      <div><b>Message:</b> <span id="message">Waiting for Wi-Fi setup...</span></div>
+    </div>
+
+    <button onclick="window.location.href='/wifi'">Change Wi-Fi Network</button>
+    <p class="hint">Fallback address: <b>http://192.168.4.1/pair</b></p>
+  </div>
+
+  <script>
+    function updateCountdown(remainingSeconds) {
+      const countdownEl = document.getElementById('countdown');
+      countdownEl.textContent =
+        (remainingSeconds === null || remainingSeconds === undefined || remainingSeconds < 0)
+          ? '--'
+          : (remainingSeconds + ' sec');
+    }
+
+    async function pollStatus() {
+      try {
+        const res = await fetch('/status');
+        const data = await res.json();
+
+        if (!data.wifiConnected) {
+          window.location.href = '/';
+          return;
+        }
+
+        document.getElementById('serial').textContent = data.serialNumber || '-';
+        document.getElementById('wifiStatus').textContent =
+          data.wifiConnected ? 'Connected' : (data.connectInProgress ? 'Connecting...' : 'Not connected');
+        document.getElementById('localIp').textContent = data.localIp || '-';
+        document.getElementById('paired').textContent = data.isPaired ? 'Yes' : 'No';
+        document.getElementById('pairingCode').textContent = data.pairingCode || '------';
+        document.getElementById('expiresAt').textContent = data.pairingExpiresAt || '-';
+        document.getElementById('message').textContent = data.message || '-';
+
+        updateCountdown(data.nextRefreshInSeconds);
+      } catch (err) {
+        document.getElementById('message').textContent = 'Failed to fetch live status';
+      }
+    }
+
+    setInterval(pollStatus, 2000);
+    pollStatus();
+  </script>
+</body>
+</html>

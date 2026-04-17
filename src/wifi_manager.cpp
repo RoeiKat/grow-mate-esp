@@ -3,10 +3,26 @@
 #include <WebServer.h>
 #include <Preferences.h>
 #include <ArduinoJson.h>
+#include <LittleFS.h>
 #include "config.h"
 #include "backend_client.h"
 
 namespace WiFiManagerApp {
+
+void setupPortalRoutes();
+void startSetupPortal();
+void stopSetupPortal();
+void handleRoot();
+void handleWifiPage();
+void handlePairPage();
+void handleNoContent();
+void handleNotFound();
+void handleSave();
+void handleRescan();
+void handleResetApi();
+void handleStatus();
+void processPendingWifiConnect();
+void refreshWifiOptionsCache();
 
 Preferences preferences;
 WebServer server(80);
@@ -14,7 +30,11 @@ WebServer server(80);
 String savedSsid;
 String savedPassword;
 
+// cached Wi-Fi list so pages load fast
+String cachedWifiOptions = "<option value=''>Scanning Wi-Fi...</option>";
+
 bool setupMode = false;
+bool portalStarted = false;
 bool buttonPressActive = false;
 unsigned long buttonPressStartMs = 0;
 
@@ -22,6 +42,11 @@ bool connectInProgress = false;
 bool connectAttemptFinished = false;
 bool connectSucceeded = false;
 String lastConnectMessage = "Waiting for Wi-Fi setup...";
+
+// deferred connect so /save response can finish cleanly
+bool pendingWifiConnect = false;
+String pendingSsid;
+String pendingPassword;
 
 String htmlEscape(const String& input) {
   String out = input;
@@ -31,6 +56,10 @@ String htmlEscape(const String& input) {
   out.replace("\"", "&quot;");
   out.replace("'", "&#39;");
   return out;
+}
+
+String getPortalBaseUrl() {
+  return String("http://") + WiFi.softAPIP().toString();
 }
 
 String buildWifiOptions() {
@@ -58,125 +87,77 @@ String buildWifiOptions() {
   return options;
 }
 
-String getSetupPage() {
-  String html = R"rawliteral(
-<!DOCTYPE html>
-<html>
-<head>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Grow Mate Setup</title>
-  <style>
-    body { font-family: Arial, sans-serif; max-width: 430px; margin: 30px auto; padding: 16px; background: #f6f6f6; color: #111; }
-    .card { background: #fff; padding: 20px; border-radius: 14px; box-shadow: 0 2px 12px rgba(0,0,0,0.08); }
-    h2 { margin-top: 0; margin-bottom: 8px; }
-    p { color: #555; margin-top: 0; margin-bottom: 18px; line-height: 1.4; }
-    label { display: block; font-weight: bold; margin-bottom: 6px; }
-    select, input, button { width: 100%; box-sizing: border-box; padding: 12px; margin-bottom: 16px; border-radius: 10px; border: 1px solid #ddd; font-size: 15px; }
-    button { border: none; background: #111; color: white; cursor: pointer; }
-    .secondary { background: #eee; color: #111; }
-    .hint { font-size: 13px; color: #777; margin-top: -8px; margin-bottom: 14px; }
-    .status { margin-top: 16px; padding: 14px; border-radius: 10px; background: #f3f3f3; }
-    .code { font-size: 28px; font-weight: bold; letter-spacing: 4px; }
-    .mono { font-family: monospace; word-break: break-all; }
-  </style>
-</head>
-<body>
-  <div class="card">
-    <h2>Grow Mate Wi-Fi Setup</h2>
-    <p>Connect this device to your home Wi-Fi.</p>
+void refreshWifiOptionsCache() {
+  Serial.println("Refreshing Wi-Fi scan cache...");
+  cachedWifiOptions = buildWifiOptions();
+}
 
-    <form action="/save" method="POST">
-      <label for="ssidSelect">Detected Wi-Fi networks</label>
-      <select id="ssidSelect" onchange="copySelectedSsid()">
-        <option value="">-- Select a network --</option>
-)rawliteral";
+bool ensureFileSystemMounted() {
+  static bool mounted = false;
+  static bool attempted = false;
 
-  html += buildWifiOptions();
+  if (mounted) return true;
+  if (attempted) return false;
 
-  html += R"rawliteral(
-      </select>
+  attempted = true;
+  mounted = LittleFS.begin(true);
 
-      <label for="ssid">Wi-Fi name (SSID)</label>
-      <input id="ssid" name="ssid" placeholder="Enter SSID" required>
+  Serial.print("LittleFS mount: ");
+  Serial.println(mounted ? "OK" : "FAILED");
+  return mounted;
+}
 
-      <label for="password">Wi-Fi password</label>
-      <input id="password" name="password" type="password" placeholder="Enter password">
+String readRequiredFile(const char* path) {
+  if (!ensureFileSystemMounted()) {
+    return String("<html><body><h1>LittleFS mount failed</h1><p>Could not load ") + path + "</p></body></html>";
+  }
 
-      <button type="submit">Save and Connect</button>
-    </form>
+  File file = LittleFS.open(path, "r");
+  if (!file) {
+    Serial.print("Failed to open file: ");
+    Serial.println(path);
+    return String("<html><body><h1>Missing file</h1><p>Could not load ") + path + "</p></body></html>";
+  }
 
-    <form action="/rescan" method="GET">
-      <button class="secondary" type="submit">Rescan Wi-Fi</button>
-    </form>
+  String content = file.readString();
+  file.close();
+  return content;
+}
 
-    <form action="/reset" method="POST">
-      <button class="secondary" type="submit">Factory Reset Device</button>
-    </form>
+String getSetupPage(bool showBackToPairingButton) {
+  String html = readRequiredFile("/setup.html");
+  html.replace("{{WIFI_OPTIONS}}", cachedWifiOptions);
+  html.replace("{{PORTAL_URL}}", htmlEscape(getPortalBaseUrl()));
+  html.replace("{{DEVICE_SERIAL}}", htmlEscape(DEVICE_SERIAL_NUMBER));
 
-    <div class="status">
-      <div><b>Device serial:</b> <span id="serial" class="mono">-</span></div>
-      <div><b>Wi-Fi status:</b> <span id="wifiStatus">Waiting...</span></div>
-      <div><b>Local IP:</b> <span id="localIp">-</span></div>
-      <div><b>Paired:</b> <span id="paired">No</span></div>
-      <div><b>Pairing code:</b> <span id="pairingCode" class="code">------</span></div>
-      <div><b>Refresh countdown:</b> <span id="countdown">--</span></div>
-      <div><b>Expires at:</b> <span id="expiresAt">-</span></div>
-      <div><b>Message:</b> <span id="message">Waiting for Wi-Fi setup...</span></div>
-    </div>
+  if (showBackToPairingButton) {
+    html.replace("{{PAIR_BACK_BUTTON}}",
+      "<button class=\"secondary\" onclick=\"window.location.href='/pair'\">Back to Pairing</button>");
+  } else {
+    html.replace("{{PAIR_BACK_BUTTON}}", "");
+  }
 
-    <div class="hint">Stay on this page after saving. The device will connect in the background and show the live pairing code here.</div>
-    <div class="hint">If the page does not open automatically, go to <b>http://192.168.4.1</b></div>
-  </div>
+  return html;
+}
 
-  <script>
-    function copySelectedSsid() {
-      const select = document.getElementById('ssidSelect');
-      const input = document.getElementById('ssid');
-      if (select.value) input.value = select.value;
-    }
-
-    function updateCountdown(remainingSeconds) {
-      const countdownEl = document.getElementById('countdown');
-      countdownEl.textContent =
-        (remainingSeconds === null || remainingSeconds === undefined || remainingSeconds < 0)
-          ? '--'
-          : (remainingSeconds + ' sec');
-    }
-
-    async function pollStatus() {
-      try {
-        const res = await fetch('/status');
-        const data = await res.json();
-
-        document.getElementById('serial').textContent = data.serialNumber || '-';
-        document.getElementById('wifiStatus').textContent =
-          data.wifiConnected ? 'Connected' : (data.connectInProgress ? 'Connecting...' : 'Not connected');
-        document.getElementById('localIp').textContent = data.localIp || '-';
-        document.getElementById('paired').textContent = data.isPaired ? 'Yes' : 'No';
-        document.getElementById('pairingCode').textContent = data.pairingCode || '------';
-        document.getElementById('expiresAt').textContent = data.pairingExpiresAt || '-';
-        document.getElementById('message').textContent = data.message || '-';
-
-        updateCountdown(data.nextRefreshInSeconds);
-      } catch (err) {
-        document.getElementById('message').textContent = 'Failed to fetch live status';
-      }
-    }
-
-    setInterval(pollStatus, 2000);
-    pollStatus();
-  </script>
-</body>
-</html>
-)rawliteral";
-
+String getPairPage() {
+  String html = readRequiredFile("/pair.html");
+  html.replace("{{PORTAL_URL}}", htmlEscape(getPortalBaseUrl()));
+  html.replace("{{DEVICE_SERIAL}}", htmlEscape(DEVICE_SERIAL_NUMBER));
   return html;
 }
 
 void loadWiFiCredentials() {
   preferences.begin("wifi", true);
-  savedSsid = preferences.getString("ssid", "");
-  savedPassword = preferences.getString("password", "");
+
+  savedSsid = preferences.isKey("ssid")
+    ? preferences.getString("ssid", "")
+    : "";
+
+  savedPassword = preferences.isKey("password")
+    ? preferences.getString("password", "")
+    : "";
+
   preferences.end();
 }
 
@@ -222,25 +203,41 @@ void checkBootButtonLongPress() {
   }
 }
 
-void handleRoot() {
-  server.send(200, "text/html", getSetupPage());
+void handleWifiPage() {
+  server.send(200, "text/html", getSetupPage(true));
 }
 
-void startStationConnect(const String& ssid, const String& password) {
-  connectInProgress = true;
-  connectAttemptFinished = false;
-  connectSucceeded = false;
-  lastConnectMessage = "Connecting to Wi-Fi...";
+void handleRoot() {
+  const bool wifiConnected = (WiFi.status() == WL_CONNECTED);
 
-  WiFi.mode(WIFI_AP_STA);
-  WiFi.begin(ssid.c_str(), password.c_str());
+  if (wifiConnected || connectInProgress || connectSucceeded) {
+    server.sendHeader("Location", "/pair", true);
+    server.send(302, "text/plain", "");
+    return;
+  }
 
-  Serial.println();
-  Serial.println("=================================");
-  Serial.println("Attempting Wi-Fi connect without restart");
-  Serial.print("SSID: ");
-  Serial.println(ssid);
-  Serial.println("=================================");
+  server.send(200, "text/html", getSetupPage(false));
+}
+
+void handlePairPage() {
+  const bool wifiConnected = (WiFi.status() == WL_CONNECTED);
+
+  // Pair page only makes sense when Wi-Fi is actually connected
+  if (!wifiConnected) {
+    server.sendHeader("Location", "/", true);
+    server.send(302, "text/plain", "");
+    return;
+  }
+
+  server.send(200, "text/html", getPairPage());
+}
+
+void handleNoContent() {
+  server.send(204);
+}
+
+void handleNotFound() {
+  handleRoot();
 }
 
 void handleSave() {
@@ -261,21 +258,51 @@ void handleSave() {
   savedSsid = newSsid;
   savedPassword = newPassword;
 
+  pendingSsid = newSsid;
+  pendingPassword = newPassword;
+  pendingWifiConnect = true;
+
+  connectInProgress = true;
+  connectAttemptFinished = false;
+  connectSucceeded = false;
+  lastConnectMessage = "Saving credentials. Starting Wi-Fi connection...";
+
   Serial.println("Saved Wi-Fi credentials:");
   Serial.print("SSID: ");
   Serial.println(newSsid);
 
-  startStationConnect(newSsid, newPassword);
+  JsonDocument doc;
+  doc["ok"] = true;
+  doc["redirectTo"] = "/pair";
+  doc["portalUrl"] = getPortalBaseUrl() + "/pair";
 
-  server.send(200, "text/html",
-    "<html><body><h3>Saved. Connecting in background...</h3>"
-    "<p>Stay on this page. The live pairing code will appear here once Wi-Fi connects.</p>"
-    "<p><a href='/'>Back to setup page</a></p>"
-    "</body></html>");
+  String response;
+  serializeJson(doc, response);
+  server.send(200, "application/json", response);
+}
+
+void processPendingWifiConnect() {
+  if (!pendingWifiConnect) return;
+
+  pendingWifiConnect = false;
+
+  Serial.println("Starting deferred Wi-Fi connection...");
+
+  WiFi.mode(WIFI_AP_STA);
+  WiFi.softAP(AP_SSID);
+  portalStarted = true;
+  setupMode = true;
+
+  WiFi.disconnect(true, true);
+  delay(300);
+
+  WiFi.begin(pendingSsid.c_str(), pendingPassword.c_str());
+  lastConnectMessage = "Connecting to Wi-Fi...";
 }
 
 void handleRescan() {
-  server.send(200, "text/html", getSetupPage());
+  refreshWifiOptionsCache();
+  server.send(200, "text/html", getSetupPage(true));
 }
 
 void handleResetApi() {
@@ -284,19 +311,15 @@ void handleResetApi() {
   factoryResetAndRestart("API /reset");
 }
 
-void handleGenerate204() { handleRoot(); }
-void handleHotspotDetect() { handleRoot(); }
-void handleConnectTest() { handleRoot(); }
-void handleNcsi() { handleRoot(); }
-
 void handleStatus() {
   JsonDocument doc;
 
   const bool wifiConnected = (WiFi.status() == WL_CONNECTED);
+  const bool isPaired = BackendClient::isPaired();
   const unsigned long lastRefreshMs = BackendClient::getLastPairingRefreshAtMs();
 
   int nextRefreshInSeconds = -1;
-  if (!BackendClient::isPaired() && lastRefreshMs > 0) {
+  if (!isPaired && lastRefreshMs > 0) {
     unsigned long elapsed = millis() - lastRefreshMs;
     unsigned long remaining = elapsed >= PAIRING_CODE_REFRESH_INTERVAL_MS
       ? 0
@@ -310,11 +333,12 @@ void handleStatus() {
   doc["connectAttemptFinished"] = connectAttemptFinished;
   doc["connectSucceeded"] = connectSucceeded;
   doc["localIp"] = wifiConnected ? WiFi.localIP().toString() : "";
-  doc["isPaired"] = BackendClient::isPaired();
+  doc["isPaired"] = isPaired;
   doc["pairingCode"] = BackendClient::getPairingCode();
   doc["pairingExpiresAt"] = BackendClient::getPairingExpiresAt();
   doc["message"] = lastConnectMessage;
   doc["nextRefreshInSeconds"] = nextRefreshInSeconds;
+  doc["portalUrl"] = getPortalBaseUrl();
 
   String response;
   serializeJson(doc, response);
@@ -322,23 +346,74 @@ void handleStatus() {
 }
 
 void setupPortalRoutes() {
-  server.on("/", HTTP_GET, handleRoot);
+  server.on("/", HTTP_ANY, handleRoot);
+  server.on("/wifi", HTTP_ANY, handleWifiPage);
+  server.on("/pair", HTTP_ANY, handlePairPage);
   server.on("/save", HTTP_POST, handleSave);
-  server.on("/rescan", HTTP_GET, handleRescan);
-  server.on("/reset", HTTP_POST, handleResetApi);
-  server.on("/reset", HTTP_GET, handleResetApi);
-  server.on("/status", HTTP_GET, handleStatus);
+  server.on("/rescan", HTTP_ANY, handleRescan);
+  server.on("/reset", HTTP_ANY, handleResetApi);
+  server.on("/status", HTTP_ANY, handleStatus);
 
-  server.on("/generate_204", HTTP_GET, handleGenerate204);
-  server.on("/hotspot-detect.html", HTTP_GET, handleHotspotDetect);
-  server.on("/connecttest.txt", HTTP_GET, handleConnectTest);
-  server.on("/ncsi.txt", HTTP_GET, handleNcsi);
+  server.on("/favicon.ico", HTTP_ANY, handleNoContent);
+  server.on("/apple-touch-icon.png", HTTP_ANY, handleNoContent);
+  server.on("/apple-touch-icon-precomposed.png", HTTP_ANY, handleNoContent);
 
-  server.onNotFound(handleRoot);
+  server.onNotFound(handleNotFound);
+}
+
+void stopSetupPortal() {
+  if (!portalStarted) return;
+
+  server.stop();
+  WiFi.softAPdisconnect(true);
+  portalStarted = false;
+  setupMode = false;
+
+  Serial.println("Setup portal stopped.");
+}
+
+void startSetupPortal() {
+  if (portalStarted) {
+    setupMode = true;
+    return;
+  }
+
+  setupMode = true;
+
+  if (WiFi.status() == WL_CONNECTED || connectInProgress) {
+    WiFi.mode(WIFI_AP_STA);
+  } else {
+    WiFi.mode(WIFI_AP);
+  }
+
+  WiFi.softAP(AP_SSID);
+
+  if (lastConnectMessage.isEmpty()) {
+    lastConnectMessage = "Waiting for Wi-Fi setup...";
+  }
+
+  // do one scan when portal starts, not on every page load
+  refreshWifiOptionsCache();
+
+  setupPortalRoutes();
+  server.begin();
+  portalStarted = true;
+
+  Serial.println();
+  Serial.println("=================================");
+  Serial.println("Starting SOFT setup portal");
+  Serial.print("AP SSID: ");
+  Serial.println(AP_SSID);
+  Serial.print("Open in browser: ");
+  Serial.println(getPortalBaseUrl());
+  Serial.print("Fallback IP: http://");
+  Serial.println(WiFi.softAPIP());
+  Serial.println("=================================");
 }
 
 void begin() {
   pinMode(BOOT_BUTTON_PIN, INPUT_PULLUP);
+  ensureFileSystemMounted();
 }
 
 bool connectToSavedWiFi() {
@@ -346,13 +421,29 @@ bool connectToSavedWiFi() {
 
   if (savedSsid.isEmpty()) {
     Serial.println("No saved Wi-Fi credentials found.");
+    startSetupPortal();
     return false;
   }
 
   Serial.print("Connecting to saved Wi-Fi: ");
   Serial.println(savedSsid);
 
-  WiFi.mode(WIFI_STA);
+  connectInProgress = true;
+  connectAttemptFinished = false;
+  connectSucceeded = false;
+  lastConnectMessage = "Connecting to saved Wi-Fi...";
+
+  WiFi.mode(WIFI_AP_STA);
+  WiFi.softAP(AP_SSID);
+  portalStarted = true;
+  setupMode = true;
+
+  // do one scan when portal starts
+  refreshWifiOptionsCache();
+
+  setupPortalRoutes();
+  server.begin();
+
   WiFi.begin(savedSsid.c_str(), savedPassword.c_str());
 
   unsigned long startedAt = millis();
@@ -362,12 +453,12 @@ bool connectToSavedWiFi() {
   }
   Serial.println();
 
+  connectInProgress = false;
+  connectAttemptFinished = true;
+
   if (WiFi.status() == WL_CONNECTED) {
-    setupMode = false;
-    connectInProgress = false;
-    connectAttemptFinished = true;
     connectSucceeded = true;
-    lastConnectMessage = "Connected to Wi-Fi.";
+    lastConnectMessage = "Connected to Wi-Fi. Waiting for pairing code...";
 
     Serial.println("Connected to home Wi-Fi.");
     Serial.print("Local IP: ");
@@ -375,61 +466,51 @@ bool connectToSavedWiFi() {
     return true;
   }
 
-  Serial.println("Failed to connect to saved Wi-Fi.");
-  return false;
-}
-
-void startSetupPortal() {
-  setupMode = true;
-  server.stop();
-  WiFi.disconnect(true, true);
-  delay(500);
-
-  WiFi.mode(WIFI_AP);
-  WiFi.softAP(AP_SSID);
-
-  connectInProgress = false;
-  connectAttemptFinished = false;
   connectSucceeded = false;
-  lastConnectMessage = "Waiting for Wi-Fi setup...";
+  lastConnectMessage = "Failed to connect to saved Wi-Fi.";
+  Serial.println("Failed to connect to saved Wi-Fi.");
 
-  Serial.println();
-  Serial.println("=================================");
-  Serial.println("Starting setup portal");
-  Serial.print("AP SSID: ");
-  Serial.println(AP_SSID);
-  Serial.print("Portal IP: http://");
-  Serial.println(WiFi.softAPIP());
-  Serial.println("=================================");
-
-  setupPortalRoutes();
-  server.begin();
+  startSetupPortal();
+  return false;
 }
 
 void handle() {
   checkBootButtonLongPress();
 
-  if (setupMode) {
-    server.handleClient();
+  if (BackendClient::isPaired()) {
+    if (portalStarted) {
+      stopSetupPortal();
+    }
 
-    if (connectInProgress && WiFi.status() == WL_CONNECTED) {
-      connectInProgress = false;
-      connectAttemptFinished = true;
-      connectSucceeded = true;
-      lastConnectMessage = "Connected to Wi-Fi. Waiting for pairing code...";
-      Serial.println("Connected to Wi-Fi while keeping setup portal alive.");
-      Serial.print("Local IP: ");
-      Serial.println(WiFi.localIP());
+    if (WiFi.status() != WL_CONNECTED && !savedSsid.isEmpty()) {
+      WiFi.mode(WIFI_STA);
+      WiFi.begin(savedSsid.c_str(), savedPassword.c_str());
     }
 
     delay(LOOP_IDLE_DELAY_MS);
     return;
   }
 
-  if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("Lost Wi-Fi connection. Reopening setup portal...");
+  if (!portalStarted) {
     startSetupPortal();
-    return;
+  }
+
+  server.handleClient();
+
+  processPendingWifiConnect();
+
+  if (connectInProgress && WiFi.status() == WL_CONNECTED) {
+    connectInProgress = false;
+    connectAttemptFinished = true;
+    connectSucceeded = true;
+    lastConnectMessage = "Connected to Wi-Fi. Waiting for pairing code...";
+    Serial.println("Connected to Wi-Fi while keeping setup portal alive.");
+    Serial.print("Local IP: ");
+    Serial.println(WiFi.localIP());
+  }
+
+  if (!connectInProgress && WiFi.status() != WL_CONNECTED && !savedSsid.isEmpty()) {
+    lastConnectMessage = "Wi-Fi disconnected. Reconnect or choose another network.";
   }
 
   delay(LOOP_IDLE_DELAY_MS);

@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Grow Mate Setup</title>
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 430px; margin: 30px auto; padding: 16px; background: #f6f6f6; color: #111; }
+    .card { background: #fff; padding: 20px; border-radius: 14px; box-shadow: 0 2px 12px rgba(0,0,0,0.08); }
+    h2 { margin-top: 0; }
+    p { color: #555; line-height: 1.4; }
+    label { display: block; font-weight: bold; margin-bottom: 6px; }
+    select, input, button { width: 100%; box-sizing: border-box; padding: 12px; margin-bottom: 16px; border-radius: 10px; border: 1px solid #ddd; font-size: 15px; }
+    button { border: none; background: #111; color: white; cursor: pointer; }
+    .secondary { background: #eee; color: #111; }
+    .hint { font-size: 13px; color: #777; }
+    .mono { font-family: monospace; word-break: break-all; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2>Grow Mate Wi-Fi Setup</h2>
+    <p>Connect this device to your home Wi-Fi.</p>
+
+    <form id="wifiForm">
+      <label for="ssidSelect">Detected Wi-Fi networks</label>
+      <select id="ssidSelect">
+        <option value="">-- Select a network --</option>
+        {{WIFI_OPTIONS}}
+      </select>
+
+      <label for="ssid">Wi-Fi name (SSID)</label>
+      <input id="ssid" name="ssid" placeholder="Enter SSID" required>
+
+      <label for="password">Wi-Fi password</label>
+      <input id="password" name="password" type="password" placeholder="Enter password">
+
+      <button type="submit">Connect</button>
+    </form>
+
+    <button class="secondary" onclick="window.location.href='/rescan'">Rescan Wi-Fi</button>
+    {{PAIR_BACK_BUTTON}}
+
+    <p class="hint">Open in browser: <b>{{PORTAL_URL}}</b></p>
+    <p class="hint">Fallback address: <b>http://192.168.4.1</b></p>
+    <p class="hint">Device serial: <span class="mono">{{DEVICE_SERIAL}}</span></p>
+    <p id="message" class="hint"></p>
+  </div>
+
+  <script>
+    const statusEl = document.getElementById('message');
+
+    document.getElementById('ssidSelect').addEventListener('change', function () {
+      if (this.value) {
+        document.getElementById('ssid').value = this.value;
+      }
+    });
+
+    document.getElementById('wifiForm').addEventListener('submit', async function (event) {
+      event.preventDefault();
+
+      const ssid = document.getElementById('ssid').value.trim();
+      const password = document.getElementById('password').value;
+
+      if (!ssid) {
+        statusEl.textContent = 'SSID is required.';
+        return;
+      }
+
+      statusEl.textContent = 'Saving Wi-Fi credentials and connecting...';
+
+      const params = new URLSearchParams();
+      params.set('ssid', ssid);
+      params.set('password', password);
+
+      const fallbackRedirect = setTimeout(() => {
+        window.location.href = '/pair';
+      }, 1500);
+
+      try {
+        const response = await fetch('/save', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: params.toString()
+        });
+
+        if (!response.ok) {
+          clearTimeout(fallbackRedirect);
+          statusEl.textContent = await response.text();
+          return;
+        }
+
+        let data = {};
+        try {
+          data = await response.json();
+        } catch (_) {
+          // ignore JSON parse issues, fallback redirect will handle it
+        }
+
+        clearTimeout(fallbackRedirect);
+        window.location.href = data.portalUrl || data.redirectTo || '/pair';
+      } catch (error) {
+        statusEl.textContent = 'Wi-Fi is switching... opening pairing page...';
+        setTimeout(() => {
+          window.location.href = '/pair';
+        }, 500);
+      }
+    });
+  </script>
+</body>
+</html>

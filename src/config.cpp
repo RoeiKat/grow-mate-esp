@@ -21,6 +21,7 @@ const char* DEVICE_FIRMWARE_VERSION = "1.0.0";
 // Network / setup portal
 // ---------------------------
 const char* AP_SSID = "GrowMate-Setup";
+const char* PORTAL_HOSTNAME = "grow-mate.local";
 const int BOOT_BUTTON_PIN = 0;
 const unsigned long RESET_HOLD_TIME_MS = 5000;
 const unsigned long WIFI_CONNECT_TIMEOUT_MS = 20000;
@@ -76,4 +77,8 @@ void initConfig() {
   DEVICE_SERIAL_NUMBER = generateDeviceSerial();
   ACTIVE_DEVICE_SECRET = String(DEFAULT_DEVICE_SECRET);
   ACTIVE_DEVICE_AUTH_VERSION = String(DEFAULT_DEVICE_AUTH_VERSION);
+}
+
+String getPortalBaseUrl() {
+  return String("http://") + PORTAL_HOSTNAME;
 }
