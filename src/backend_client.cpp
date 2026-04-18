@@ -279,6 +279,64 @@ bool sendTelemetry() {
   return false;
 }
 
+bool handleRefreshTelemetry(const JsonObjectConst& command) {
+  String commandId = command["_id"] | command["id"] | "";
+
+  if (commandId.isEmpty()) {
+    Serial.println("[REFRESH] Missing command id.");
+    return false;
+  }
+
+  updateCommandStatusMessage(commandId, "in_progress", "Refreshing telemetry now");
+
+  bool sent = sendTelemetry();
+
+  JsonDocument result;
+  if (sent) {
+    result["message"] = "Telemetry refreshed successfully";
+    result["telemetrySent"] = true;
+    return updateCommandStatusWithResult(commandId, "finished", result);
+  }
+
+  result["message"] = "Failed to send telemetry";
+  result["telemetrySent"] = false;
+  return updateCommandStatusWithResult(commandId, "failed", result);
+}
+
+bool handleWaterPlant(const JsonObjectConst& command) {
+  String commandId = command["_id"] | command["id"] | "";
+  JsonObjectConst payload = command["payload"].as<JsonObjectConst>();
+
+  if (commandId.isEmpty()) {
+    Serial.println("[WATER] Missing command id.");
+    return false;
+  }
+
+  int amountMl = payload["amountMl"] | 0;
+  const char* reason = payload["reason"] | "manual";
+
+  updateCommandStatusMessage(commandId, "in_progress", "Watering command received");
+
+  Serial.println();
+  Serial.println("[WATER] =================================");
+  Serial.println("[WATER] Water plant command received");
+  Serial.print("[WATER] amountMl: ");
+  Serial.println(amountMl);
+  Serial.print("[WATER] reason: ");
+  Serial.println(reason);
+  Serial.println("[WATER] No pump/servo installed yet.");
+  Serial.println("[WATER] TODO: replace this handler with real actuator logic.");
+  Serial.println("[WATER] =================================");
+
+  JsonDocument result;
+  result["message"] = "Water command simulated on device";
+  result["amountMl"] = amountMl;
+  result["reason"] = reason;
+  result["simulated"] = true;
+
+  return updateCommandStatusWithResult(commandId, "finished", result);
+}
+
 bool handleRotateAuthSecret(const JsonObjectConst& command) {
   String commandId = command["_id"] | command["id"] | "";
   JsonObjectConst payload = command["payload"].as<JsonObjectConst>();
@@ -407,6 +465,14 @@ bool executeCommand(const JsonObjectConst& command) {
   Serial.println(commandId);
   Serial.print("[COMMAND] Type: ");
   Serial.println(type);
+
+  if (type == "refresh_telemetry") {
+    return handleRefreshTelemetry(command);
+  }
+
+  if (type == "water_plant") {
+    return handleWaterPlant(command);
+  }
 
   if (type == "rotate_auth_secret") {
     return handleRotateAuthSecret(command);
