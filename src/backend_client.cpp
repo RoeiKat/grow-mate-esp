@@ -4,6 +4,7 @@
 #include <HTTPUpdate.h>
 #include <Preferences.h>
 #include <WiFi.h>
+#include <math.h>
 #include "backend_client.h"
 #include "config.h"
 
@@ -14,6 +15,7 @@ Preferences prefs;
 const char* PREFS_NAMESPACE = "growmate";
 const char* PREF_KEY_SECRET = "auth_secret";
 const char* PREF_KEY_VERSION = "auth_ver";
+const char* PREF_KEY_RESET_PENDING = "reset_pending";
 
 struct TelemetryData {
   float temperatureC;
@@ -26,6 +28,8 @@ struct TelemetryData {
 
 struct DeviceRuntimeState {
   bool isPaired = false;
+  bool factoryResetPending = false;
+  unsigned long lastFactoryResetAttemptAt = 0;
   String lastPairingCode;
   String lastPairingExpiresAt;
   unsigned long lastTelemetryAt = 0;
@@ -58,6 +62,29 @@ bool persistActiveAuth() {
   return ok1 && ok2;
 }
 
+bool persistFactoryResetPendingFlag(bool pending) {
+  prefs.begin(PREFS_NAMESPACE, false);
+  bool ok = prefs.putBool(PREF_KEY_RESET_PENDING, pending);
+  prefs.end();
+  return ok;
+}
+
+void loadFactoryResetPendingFlag() {
+  prefs.begin(PREFS_NAMESPACE, true);
+  runtimeState.factoryResetPending = prefs.getBool(PREF_KEY_RESET_PENDING, false);
+  prefs.end();
+}
+
+void clearPairingState() {
+  runtimeState.isPaired = false;
+  runtimeState.lastPairingCode = "";
+  runtimeState.lastPairingExpiresAt = "";
+  runtimeState.lastPairingCodeRequestAt = 0;
+  runtimeState.lastHeartbeatAt = 0;
+  runtimeState.lastTelemetryAt = 0;
+  runtimeState.lastCommandPollAt = 0;
+}
+
 void addDefaultHeaders(HTTPClient& http) {
   http.addHeader("Content-Type", "application/json");
   http.addHeader("x-device-serial", DEVICE_SERIAL_NUMBER);
@@ -78,6 +105,39 @@ bool beginJsonRequest(HTTPClient& http, const String& url) {
   return true;
 }
 
+bool syncFactoryResetWithBackend() {
+  if (WiFi.status() != WL_CONNECTED) return false;
+
+  HTTPClient http;
+  String url = buildApiUrl(DEVICE_RESET_PATH);
+  if (!beginJsonRequest(http, url)) return false;
+
+  int statusCode = http.POST("{}");
+  String response = http.getString();
+  http.end();
+
+  Serial.print("[RESET_SYNC] HTTP status: ");
+  Serial.println(statusCode);
+
+  if (statusCode < 200 || statusCode >= 300) {
+    Serial.print("[RESET_SYNC] Response: ");
+    Serial.println(response);
+    return false;
+  }
+
+  JsonDocument doc;
+  if (deserializeJson(doc, response) != DeserializationError::Ok) {
+    Serial.println("[RESET_SYNC] JSON parse failed.");
+  }
+
+  runtimeState.factoryResetPending = false;
+  persistFactoryResetPendingFlag(false);
+  clearPairingState();
+
+  Serial.println("[RESET_SYNC] Backend reset synced successfully.");
+  return true;
+}
+
 struct TelemetryData readDummyTelemetry() {
   const unsigned long seconds = millis() / 1000;
 
@@ -93,12 +153,6 @@ struct TelemetryData readDummyTelemetry() {
   data.pumpActive = false;
   data.online = true;
   return data;
-}
-
-void printPrettyJson(const JsonDocument& doc) {
-  String out;
-  serializeJsonPretty(doc, out);
-  Serial.println(out);
 }
 
 bool updateCommandStatusWithResult(const String& commandId, const char* status, const JsonDocument& resultDoc) {
@@ -161,8 +215,6 @@ bool requestPairingCode() {
   Serial.println(DEVICE_SERIAL_NUMBER);
   Serial.print("[PAIRING] Auth version: ");
   Serial.println(ACTIVE_DEVICE_AUTH_VERSION);
-  Serial.print("[PAIRING] Auth secret: ");
-  Serial.println(ACTIVE_DEVICE_SECRET);
 
   int statusCode = http.POST(body);
   String response = http.getString();
@@ -224,46 +276,46 @@ bool sendHeartbeat() {
   Serial.print("[HEARTBEAT] HTTP status: ");
   Serial.println(statusCode);
 
-  if (statusCode >= 200 && statusCode < 300) {
-    JsonDocument doc;
-    if (deserializeJson(doc, response) == DeserializationError::Ok) {
-      runtimeState.isPaired = doc["device"]["isPaired"] | doc["paired"] | runtimeState.isPaired;
-    }
-    return true;
+  if (statusCode < 200 || statusCode >= 300) {
+    Serial.print("[HEARTBEAT] Response: ");
+    Serial.println(response);
+    return false;
   }
 
-  if (statusCode == 401 || statusCode == 403) {
-    Serial.println("[HEARTBEAT] Auth rejected by backend.");
+  JsonDocument doc;
+  DeserializationError error = deserializeJson(doc, response);
+  if (error) {
+    Serial.print("[HEARTBEAT] JSON parse failed: ");
+    Serial.println(error.c_str());
+    return false;
   }
 
-  Serial.print("[HEARTBEAT] Response: ");
-  Serial.println(response);
-  return false;
+  runtimeState.isPaired = doc["device"]["isPaired"] | doc["paired"] | false;
+  return true;
 }
 
 bool sendTelemetry() {
   if (WiFi.status() != WL_CONNECTED) return false;
+  if (!runtimeState.isPaired) return false;
 
   TelemetryData telemetry = readDummyTelemetry();
 
-  JsonDocument doc;
-  doc["temperature"] = telemetry.temperatureC;
-  doc["humidity"] = telemetry.humidityPercent;
-  doc["soilMoisture"] = telemetry.soilMoisturePercent;
-  doc["waterLevel"] = telemetry.waterLevelPercent;
-  doc["pumpActive"] = telemetry.pumpActive;
-  doc["online"] = telemetry.online;
-  doc["firmwareVersion"] = DEVICE_FIRMWARE_VERSION;
-  doc["model"] = DEVICE_MODEL;
+  JsonDocument body;
+  body["temperatureC"] = telemetry.temperatureC;
+  body["humidityPercent"] = telemetry.humidityPercent;
+  body["soilMoisturePercent"] = telemetry.soilMoisturePercent;
+  body["waterLevelPercent"] = telemetry.waterLevelPercent;
+  body["pumpActive"] = telemetry.pumpActive;
+  body["online"] = telemetry.online;
 
-  String body;
-  serializeJson(doc, body);
+  String payload;
+  serializeJson(body, payload);
 
   HTTPClient http;
   String url = buildApiUrl(TELEMETRY_PATH);
   if (!beginJsonRequest(http, url)) return false;
 
-  int statusCode = http.POST(body);
+  int statusCode = http.POST(payload);
   String response = http.getString();
   http.end();
 
@@ -373,8 +425,6 @@ bool handleRotateAuthSecret(const JsonObjectConst& command) {
 
     Serial.print("[ROTATE_AUTH] Rotation complete. New version: ");
     Serial.println(ACTIVE_DEVICE_AUTH_VERSION);
-    Serial.print("[ROTATE_AUTH] New secret: ");
-    Serial.println(ACTIVE_DEVICE_SECRET);
     return true;
   }
 
@@ -488,6 +538,7 @@ bool executeCommand(const JsonObjectConst& command) {
 
 bool pollPendingCommands() {
   if (WiFi.status() != WL_CONNECTED) return false;
+  if (!runtimeState.isPaired) return false;
 
   HTTPClient http;
   String url = buildApiUrl(PENDING_COMMANDS_PATH);
@@ -565,17 +616,32 @@ void printIdentity() {
 void begin() {
   resetRuntimeState();
   loadStoredAuth();
+  loadFactoryResetPendingFlag();
   printIdentity();
+
+  if (runtimeState.factoryResetPending) {
+    Serial.println("[RESET_SYNC] Factory reset is pending and will sync after Wi-Fi connects.");
+  }
 }
 
 void resetRuntimeState() {
   runtimeState = DeviceRuntimeState{};
+  loadFactoryResetPendingFlag();
 }
 
 void handle() {
   if (WiFi.status() != WL_CONNECTED) return;
 
   const unsigned long now = millis();
+
+  if (runtimeState.factoryResetPending) {
+    if (runtimeState.lastFactoryResetAttemptAt == 0 ||
+        now - runtimeState.lastFactoryResetAttemptAt >= 5000) {
+      runtimeState.lastFactoryResetAttemptAt = now;
+      syncFactoryResetWithBackend();
+    }
+    return;
+  }
 
   if (!runtimeState.isPaired) {
     if (runtimeState.lastPairingCodeRequestAt == 0 ||
@@ -603,6 +669,17 @@ void handle() {
     runtimeState.lastCommandPollAt = now;
     pollPendingCommands();
   }
+}
+
+void markFactoryResetPending() {
+  runtimeState.factoryResetPending = true;
+  runtimeState.lastFactoryResetAttemptAt = 0;
+  persistFactoryResetPendingFlag(true);
+  clearPairingState();
+}
+
+bool isFactoryResetPending() {
+  return runtimeState.factoryResetPending;
 }
 
 bool isPaired() {

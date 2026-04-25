@@ -1,37 +1,21 @@
 #include <Arduino.h>
-#include <WiFi.h>
-#include <WebServer.h>
-#include <Preferences.h>
 #include <ArduinoJson.h>
 #include <LittleFS.h>
-#include "config.h"
+#include <Preferences.h>
+#include <WebServer.h>
+#include <WiFi.h>
 #include "backend_client.h"
+#include "config.h"
+#include "wifi_manager.h"
 
 namespace WiFiManagerApp {
-
-void setupPortalRoutes();
-void startSetupPortal();
-void stopSetupPortal();
-void handleRoot();
-void handleWifiPage();
-void handlePairPage();
-void handleNoContent();
-void handleNotFound();
-void handleSave();
-void handleRescan();
-void handleResetApi();
-void handleStatus();
-void processPendingWifiConnect();
-void refreshWifiOptionsCache();
 
 Preferences preferences;
 WebServer server(80);
 
 String savedSsid;
 String savedPassword;
-
-// cached Wi-Fi list so pages load fast
-String cachedWifiOptions = "<option value=''>Scanning Wi-Fi...</option>";
+String cachedWifiOptions;
 
 bool setupMode = false;
 bool portalStarted = false;
@@ -58,7 +42,7 @@ String htmlEscape(const String& input) {
   return out;
 }
 
-String getPortalBaseUrl() {
+String getPortalBaseUrlLocal() {
   return String("http://") + WiFi.softAPIP().toString();
 }
 
@@ -127,7 +111,7 @@ String readRequiredFile(const char* path) {
 String getSetupPage(bool showBackToPairingButton) {
   String html = readRequiredFile("/setup.html");
   html.replace("{{WIFI_OPTIONS}}", cachedWifiOptions);
-  html.replace("{{PORTAL_URL}}", htmlEscape(getPortalBaseUrl()));
+  html.replace("{{PORTAL_URL}}", htmlEscape(getPortalBaseUrlLocal()));
   html.replace("{{DEVICE_SERIAL}}", htmlEscape(DEVICE_SERIAL_NUMBER));
 
   if (showBackToPairingButton) {
@@ -142,7 +126,7 @@ String getSetupPage(bool showBackToPairingButton) {
 
 String getPairPage() {
   String html = readRequiredFile("/pair.html");
-  html.replace("{{PORTAL_URL}}", htmlEscape(getPortalBaseUrl()));
+  html.replace("{{PORTAL_URL}}", htmlEscape(getPortalBaseUrlLocal()));
   html.replace("{{DEVICE_SERIAL}}", htmlEscape(DEVICE_SERIAL_NUMBER));
   return html;
 }
@@ -174,6 +158,57 @@ void clearWiFiCredentials() {
   preferences.end();
 }
 
+void stopSetupPortal() {
+  if (!portalStarted) return;
+
+  server.stop();
+  WiFi.softAPdisconnect(true);
+  portalStarted = false;
+  setupMode = false;
+
+  Serial.println("Setup portal stopped.");
+}
+
+void setupPortalRoutes();
+
+void startSetupPortal() {
+  if (portalStarted) {
+    setupMode = true;
+    return;
+  }
+
+  setupMode = true;
+
+  if (WiFi.status() == WL_CONNECTED || connectInProgress) {
+    WiFi.mode(WIFI_AP_STA);
+  } else {
+    WiFi.mode(WIFI_AP);
+  }
+
+  WiFi.softAP(AP_SSID);
+
+  if (lastConnectMessage.isEmpty()) {
+    lastConnectMessage = "Waiting for Wi-Fi setup...";
+  }
+
+  refreshWifiOptionsCache();
+
+  setupPortalRoutes();
+  server.begin();
+  portalStarted = true;
+
+  Serial.println();
+  Serial.println("=================================");
+  Serial.println("Starting SOFT setup portal");
+  Serial.print("AP SSID: ");
+  Serial.println(AP_SSID);
+  Serial.print("Open in browser: ");
+  Serial.println(getPortalBaseUrlLocal());
+  Serial.print("Fallback IP: http://");
+  Serial.println(WiFi.softAPIP());
+  Serial.println("=================================");
+}
+
 void factoryResetAndRestart(const char* reason) {
   Serial.println();
   Serial.println("=================================");
@@ -181,8 +216,12 @@ void factoryResetAndRestart(const char* reason) {
   Serial.print("Reason: ");
   Serial.println(reason);
   Serial.println("Clearing saved Wi-Fi credentials...");
+  Serial.println("Marking backend deprovision sync as pending...");
   Serial.println("=================================");
+
   clearWiFiCredentials();
+  BackendClient::markFactoryResetPending();
+
   delay(500);
   ESP.restart();
 }
@@ -222,7 +261,6 @@ void handleRoot() {
 void handlePairPage() {
   const bool wifiConnected = (WiFi.status() == WL_CONNECTED);
 
-  // Pair page only makes sense when Wi-Fi is actually connected
   if (!wifiConnected) {
     server.sendHeader("Location", "/", true);
     server.send(302, "text/plain", "");
@@ -274,7 +312,7 @@ void handleSave() {
   JsonDocument doc;
   doc["ok"] = true;
   doc["redirectTo"] = "/pair";
-  doc["portalUrl"] = getPortalBaseUrl() + "/pair";
+  doc["portalUrl"] = getPortalBaseUrlLocal() + "/pair";
 
   String response;
   serializeJson(doc, response);
@@ -293,7 +331,7 @@ void processPendingWifiConnect() {
   portalStarted = true;
   setupMode = true;
 
-  WiFi.disconnect(true, true);
+  WiFi.disconnect(false, true);
   delay(300);
 
   WiFi.begin(pendingSsid.c_str(), pendingPassword.c_str());
@@ -338,7 +376,9 @@ void handleStatus() {
   doc["pairingExpiresAt"] = BackendClient::getPairingExpiresAt();
   doc["message"] = lastConnectMessage;
   doc["nextRefreshInSeconds"] = nextRefreshInSeconds;
-  doc["portalUrl"] = getPortalBaseUrl();
+  doc["portalUrl"] = getPortalBaseUrlLocal();
+  doc["factoryResetPending"] = BackendClient::isFactoryResetPending();
+  doc["portalStarted"] = portalStarted;
 
   String response;
   serializeJson(doc, response);
@@ -359,56 +399,6 @@ void setupPortalRoutes() {
   server.on("/apple-touch-icon-precomposed.png", HTTP_ANY, handleNoContent);
 
   server.onNotFound(handleNotFound);
-}
-
-void stopSetupPortal() {
-  if (!portalStarted) return;
-
-  server.stop();
-  WiFi.softAPdisconnect(true);
-  portalStarted = false;
-  setupMode = false;
-
-  Serial.println("Setup portal stopped.");
-}
-
-void startSetupPortal() {
-  if (portalStarted) {
-    setupMode = true;
-    return;
-  }
-
-  setupMode = true;
-
-  if (WiFi.status() == WL_CONNECTED || connectInProgress) {
-    WiFi.mode(WIFI_AP_STA);
-  } else {
-    WiFi.mode(WIFI_AP);
-  }
-
-  WiFi.softAP(AP_SSID);
-
-  if (lastConnectMessage.isEmpty()) {
-    lastConnectMessage = "Waiting for Wi-Fi setup...";
-  }
-
-  // do one scan when portal starts, not on every page load
-  refreshWifiOptionsCache();
-
-  setupPortalRoutes();
-  server.begin();
-  portalStarted = true;
-
-  Serial.println();
-  Serial.println("=================================");
-  Serial.println("Starting SOFT setup portal");
-  Serial.print("AP SSID: ");
-  Serial.println(AP_SSID);
-  Serial.print("Open in browser: ");
-  Serial.println(getPortalBaseUrl());
-  Serial.print("Fallback IP: http://");
-  Serial.println(WiFi.softAPIP());
-  Serial.println("=================================");
 }
 
 void begin() {
@@ -438,9 +428,7 @@ bool connectToSavedWiFi() {
   portalStarted = true;
   setupMode = true;
 
-  // do one scan when portal starts
   refreshWifiOptionsCache();
-
   setupPortalRoutes();
   server.begin();
 
@@ -477,7 +465,7 @@ bool connectToSavedWiFi() {
 void handle() {
   checkBootButtonLongPress();
 
-  if (BackendClient::isPaired()) {
+  if (BackendClient::isPaired() && !BackendClient::isFactoryResetPending()) {
     if (portalStarted) {
       stopSetupPortal();
     }
@@ -496,7 +484,6 @@ void handle() {
   }
 
   server.handleClient();
-
   processPendingWifiConnect();
 
   if (connectInProgress && WiFi.status() == WL_CONNECTED) {

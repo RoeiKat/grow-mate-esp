@@ -35,6 +35,7 @@ extern const char* HEARTBEAT_PATH;
 extern const char* TELEMETRY_PATH;
 extern const char* PENDING_COMMANDS_PATH;
 extern const char* COMMAND_STATUS_BASE_PATH;
+extern const char* DEVICE_RESET_PATH;
 
 // ---------------------------
 // Timing

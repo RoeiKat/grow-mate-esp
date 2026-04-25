@@ -36,6 +36,7 @@ const char* HEARTBEAT_PATH = "/api/device-client/heartbeat";
 const char* TELEMETRY_PATH = "/api/device-client/data";
 const char* PENDING_COMMANDS_PATH = "/api/device-client/commands/pending";
 const char* COMMAND_STATUS_BASE_PATH = "/api/device-client/commands";
+const char* DEVICE_RESET_PATH = "/api/device-client/reset";
 
 // ---------------------------
 // Timing

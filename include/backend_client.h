@@ -7,6 +7,9 @@ namespace BackendClient {
   void resetRuntimeState();
   void printIdentity();
 
+  void markFactoryResetPending();
+  bool isFactoryResetPending();
+
   bool isPaired();
   bool hasPairingCode();
   String getPairingCode();
