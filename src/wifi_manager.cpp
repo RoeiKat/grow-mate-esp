@@ -16,6 +16,7 @@ WebServer server(80);
 String savedSsid;
 String savedPassword;
 String cachedWifiOptions;
+unsigned long wifiConnectStartedAtMs = 0;
 
 bool setupMode = false;
 bool portalStarted = false;
@@ -57,13 +58,7 @@ String buildWifiOptions() {
 
   for (int i = 0; i < networkCount; i++) {
     String ssid = WiFi.SSID(i);
-    int rssi = WiFi.RSSI(i);
-    bool open = (WiFi.encryptionType(i) == WIFI_AUTH_OPEN);
-
     String label = htmlEscape(ssid);
-    label += " (" + String(rssi) + " dBm";
-    if (open) label += ", open";
-    label += ")";
 
     options += "<option value='" + htmlEscape(ssid) + "'>" + label + "</option>";
   }
@@ -108,15 +103,15 @@ String readRequiredFile(const char* path) {
   return content;
 }
 
-String getSetupPage(bool showBackToPairingButton) {
+String getSetupPage(bool showBackToPairingButton, const String& startStep) {
   String html = readRequiredFile("/setup.html");
   html.replace("{{WIFI_OPTIONS}}", cachedWifiOptions);
   html.replace("{{PORTAL_URL}}", htmlEscape(getPortalBaseUrlLocal()));
   html.replace("{{DEVICE_SERIAL}}", htmlEscape(DEVICE_SERIAL_NUMBER));
+  html.replace("{{START_STEP}}", htmlEscape(startStep));
 
   if (showBackToPairingButton) {
-    html.replace("{{PAIR_BACK_BUTTON}}",
-      "<button class=\"secondary\" onclick=\"window.location.href='/pair'\">Back to Pairing</button>");
+    html.replace("{{PAIR_BACK_BUTTON}}", "");
   } else {
     html.replace("{{PAIR_BACK_BUTTON}}", "");
   }
@@ -191,7 +186,9 @@ void startSetupPortal() {
     lastConnectMessage = "Waiting for Wi-Fi setup...";
   }
 
-  refreshWifiOptionsCache();
+  if (cachedWifiOptions.isEmpty()) {
+    refreshWifiOptionsCache();
+  }
 
   setupPortalRoutes();
   server.begin();
@@ -243,7 +240,7 @@ void checkBootButtonLongPress() {
 }
 
 void handleWifiPage() {
-  server.send(200, "text/html", getSetupPage(true));
+  server.send(200, "text/html", getSetupPage(true, "wifi"));
 }
 
 void handleRoot() {
@@ -255,7 +252,7 @@ void handleRoot() {
     return;
   }
 
-  server.send(200, "text/html", getSetupPage(false));
+  server.send(200, "text/html", getSetupPage(false, "welcome"));
 }
 
 void handlePairPage() {
@@ -304,6 +301,7 @@ void handleSave() {
   connectAttemptFinished = false;
   connectSucceeded = false;
   lastConnectMessage = "Saving credentials. Starting Wi-Fi connection...";
+  wifiConnectStartedAtMs = 0;
 
   Serial.println("Saved Wi-Fi credentials:");
   Serial.print("SSID: ");
@@ -335,12 +333,16 @@ void processPendingWifiConnect() {
   delay(300);
 
   WiFi.begin(pendingSsid.c_str(), pendingPassword.c_str());
+  wifiConnectStartedAtMs = millis();
   lastConnectMessage = "Connecting to Wi-Fi...";
+  connectInProgress = true;
+  connectAttemptFinished = false;
+  connectSucceeded = false;
 }
 
 void handleRescan() {
   refreshWifiOptionsCache();
-  server.send(200, "text/html", getSetupPage(true));
+  server.send(200, "text/html", getSetupPage(true, "wifi"));
 }
 
 void handleResetApi() {
@@ -428,7 +430,9 @@ bool connectToSavedWiFi() {
   portalStarted = true;
   setupMode = true;
 
-  refreshWifiOptionsCache();
+  if (cachedWifiOptions.isEmpty()) {
+    refreshWifiOptionsCache();
+  }
   setupPortalRoutes();
   server.begin();
 
@@ -486,12 +490,24 @@ void handle() {
   server.handleClient();
   processPendingWifiConnect();
 
+  if (connectInProgress && WiFi.status() != WL_CONNECTED && wifiConnectStartedAtMs > 0 && millis() - wifiConnectStartedAtMs >= WIFI_CONNECT_TIMEOUT_MS) {
+    connectInProgress = false;
+    connectAttemptFinished = true;
+    connectSucceeded = false;
+    wifiConnectStartedAtMs = 0;
+    lastConnectMessage = "Could not connect to Wi-Fi. Check the network name or password.";
+    WiFi.disconnect(false, true);
+    Serial.println("Wi-Fi connection attempt timed out.");
+  }
+
   if (connectInProgress && WiFi.status() == WL_CONNECTED) {
     connectInProgress = false;
     connectAttemptFinished = true;
     connectSucceeded = true;
-    lastConnectMessage = "Connected to Wi-Fi. Waiting for pairing code...";
-    Serial.println("Connected to Wi-Fi while keeping setup portal alive.");
+    wifiConnectStartedAtMs = 0;
+    lastConnectMessage = "Connected to Wi-Fi. Waiting for pairing code.";
+
+    Serial.println("Connected to home Wi-Fi.");
     Serial.print("Local IP: ");
     Serial.println(WiFi.localIP());
   }

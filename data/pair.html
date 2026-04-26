@@ -2,71 +2,198 @@
 <html>
 <head>
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Grow Mate Pairing</title>
+  <title>ARO Pairing</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Oxanium:wght@200..800&display=swap" rel="stylesheet">
+
   <style>
-    body { font-family: Arial, sans-serif; max-width: 430px; margin: 30px auto; padding: 16px; background: #f6f6f6; color: #111; }
-    .card { background: #fff; padding: 20px; border-radius: 14px; box-shadow: 0 2px 12px rgba(0,0,0,0.08); }
-    h2 { margin-top: 0; }
-    p { color: #555; line-height: 1.4; }
-    .status { margin-top: 16px; padding: 14px; border-radius: 10px; background: #f3f3f3; }
-    .code { font-size: 32px; font-weight: bold; letter-spacing: 4px; }
-    .mono { font-family: monospace; word-break: break-all; }
-    button { width: 100%; box-sizing: border-box; padding: 12px; margin-top: 16px; border-radius: 10px; border: none; background: #111; color: white; cursor: pointer; font-size: 15px; }
-    .hint { font-size: 13px; color: #777; }
-  </style>
-</head>
-<body>
-  <div class="card">
-    <h2>Pair Your Grow Mate</h2>
-    <p>Once the device connects to Wi-Fi, the pairing code will appear here automatically.</p>
+    :root {
+      --primary: #3F826D;
+      --secondary: #C7C6BC;
+      --bg: #F9F7F3;
+      --text: #323232;
 
-    <div class="status">
-      <div><b>Device serial:</b> <span id="serial" class="mono">{{DEVICE_SERIAL}}</span></div>
-      <div><b>Portal address:</b> <span class="mono">{{PORTAL_URL}}</span></div>
-      <div><b>Wi-Fi status:</b> <span id="wifiStatus">Waiting...</span></div>
-      <div><b>Local IP:</b> <span id="localIp">-</span></div>
-      <div><b>Paired:</b> <span id="paired">No</span></div>
-      <div><b>Pairing code:</b> <span id="pairingCode" class="code">------</span></div>
-      <div><b>Refresh countdown:</b> <span id="countdown">--</span></div>
-      <div><b>Expires at:</b> <span id="expiresAt">-</span></div>
-      <div><b>Message:</b> <span id="message">Waiting for Wi-Fi setup...</span></div>
-    </div>
-
-    <button onclick="window.location.href='/wifi'">Change Wi-Fi Network</button>
-    <p class="hint">Fallback address: <b>http://192.168.4.1/pair</b></p>
-  </div>
-
-  <script>
-    function updateCountdown(remainingSeconds) {
-      const countdownEl = document.getElementById('countdown');
-      countdownEl.textContent =
-        (remainingSeconds === null || remainingSeconds === undefined || remainingSeconds < 0)
-          ? '--'
-          : (remainingSeconds + ' sec');
+      --logo-size: 54px;
+      --logo-weight: 800;
+      --logo-letter-spacing: 0px;
+      --page-top-padding: 0px;
     }
 
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: "Oxanium", Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
+      padding: var(--page-top-padding) 22px 22px;
+    }
+
+    .app {
+      width: 100%;
+      max-width: 430px;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .logo {
+      text-align: center;
+      font-size: var(--logo-size);
+      font-weight: var(--logo-weight);
+      color: var(--primary);
+      margin: 0 0 6px;
+      letter-spacing: var(--logo-letter-spacing);
+      line-height: 0.95;
+    }
+
+    .card {
+      background: #fff;
+      border-radius: 10mm;
+      padding: 24px 24px 20px;
+      box-shadow: 0 18px 45px rgba(50, 50, 50, 0.12);
+      display: flex;
+      flex-direction: column;
+    }
+
+    .stepper { margin-bottom: 32px; }
+
+    .step-labels {
+      display: flex;
+      justify-content: space-between;
+      font-size: 13px;
+      font-weight: 600;
+      margin-bottom: 10px;
+      color: rgba(50, 50, 50, 0.55);
+    }
+
+    .step-labels .active { color: var(--primary); }
+
+    .bar {
+      width: 100%;
+      height: 9px;
+      background: rgba(199, 198, 188, 0.55);
+      border-radius: 999px;
+      overflow: hidden;
+    }
+
+    .bar-fill {
+      height: 100%;
+      width: 100%;
+      background: var(--primary);
+      border-radius: 999px;
+    }
+
+    .content {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      text-align: center;
+    }
+
+    h1 {
+      font-size: 28px;
+      margin: 0 0 12px;
+    }
+
+    p {
+      margin: 0;
+      color: rgba(50, 50, 50, 0.72);
+      line-height: 1.45;
+      font-size: 15px;
+    }
+
+    .code-box {
+      margin: 44px 0 16px;
+      padding: 28px 18px;
+      border-radius: 10mm;
+      background: rgba(63, 130, 109, 0.1);
+      border: 2px solid rgba(63, 130, 109, 0.22);
+    }
+
+    .code {
+      font-size: 46px;
+      font-weight: 800;
+      letter-spacing: 7px;
+      color: var(--primary);
+    }
+
+    .refresh-text {
+      font-size: 14px;
+      font-weight: 600;
+      color: rgba(50, 50, 50, 0.6);
+    }
+
+    button {
+      width: 100%;
+      border: none;
+      border-radius: 10mm;
+      padding: 15px 18px;
+      font-family: "Oxanium", Arial, sans-serif;
+      font-size: 15px;
+      font-weight: 700;
+      cursor: pointer;
+      margin-top: 20px;
+    }
+
+    .secondary {
+      background: var(--secondary);
+      color: var(--text);
+    }
+  </style>
+</head>
+
+<body>
+  <main class="app">
+    <div class="logo">ARO</div>
+
+    <section class="card">
+      <div class="stepper">
+        <div class="step-labels">
+          <span>Wi-Fi Setup</span>
+          <span class="active">Pairing</span>
+        </div>
+        <div class="bar">
+          <div class="bar-fill"></div>
+        </div>
+      </div>
+
+      <div class="content">
+        <h1>Pair your device</h1>
+        <p>Open the ARO app and enter this pairing code.</p>
+
+        <div class="code-box">
+          <div id="pairingCode" class="code">------</div>
+        </div>
+
+        <p class="refresh-text">Refreshes automatically every 60 sec</p>
+
+        <button class="secondary" onclick="window.location.href='/wifi'">Go back</button>
+      </div>
+    </section>
+  </main>
+
+  <script>
     async function pollStatus() {
       try {
-        const res = await fetch('/status');
+        const res = await fetch("/status?ts=" + Date.now(), { cache: "no-store" });
+        if (!res.ok) return;
+
         const data = await res.json();
 
-        if (!data.wifiConnected) {
-          window.location.href = '/';
+        if (data.wifiConnected === false && !data.connectInProgress && !data.localIp) {
+          window.location.href = "/";
           return;
         }
 
-        document.getElementById('serial').textContent = data.serialNumber || '-';
-        document.getElementById('wifiStatus').textContent =
-          data.wifiConnected ? 'Connected' : (data.connectInProgress ? 'Connecting...' : 'Not connected');
-        document.getElementById('localIp').textContent = data.localIp || '-';
-        document.getElementById('paired').textContent = data.isPaired ? 'Yes' : 'No';
-        document.getElementById('pairingCode').textContent = data.pairingCode || '------';
-        document.getElementById('expiresAt').textContent = data.pairingExpiresAt || '-';
-        document.getElementById('message').textContent = data.message || '-';
-
-        updateCountdown(data.nextRefreshInSeconds);
+        document.getElementById("pairingCode").textContent = data.pairingCode || "------";
       } catch (err) {
-        document.getElementById('message').textContent = 'Failed to fetch live status';
+        document.getElementById("pairingCode").textContent = "------";
       }
     }
 

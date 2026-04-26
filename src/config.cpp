@@ -20,7 +20,7 @@ const char* DEVICE_FIRMWARE_VERSION = "1.0.0";
 // ---------------------------
 // Network / setup portal
 // ---------------------------
-const char* AP_SSID = "GrowMate-Setup";
+const char* AP_SSID = "ARO - G1";
 const char* PORTAL_HOSTNAME = "grow-mate.local";
 const int BOOT_BUTTON_PIN = 0;
 const unsigned long RESET_HOLD_TIME_MS = 5000;

@@ -2,109 +2,412 @@
 <html>
 <head>
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Grow Mate Setup</title>
+  <title>ARO Setup</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Oxanium:wght@200..800&display=swap" rel="stylesheet">
+
   <style>
-    body { font-family: Arial, sans-serif; max-width: 430px; margin: 30px auto; padding: 16px; background: #f6f6f6; color: #111; }
-    .card { background: #fff; padding: 20px; border-radius: 14px; box-shadow: 0 2px 12px rgba(0,0,0,0.08); }
-    h2 { margin-top: 0; }
-    p { color: #555; line-height: 1.4; }
-    label { display: block; font-weight: bold; margin-bottom: 6px; }
-    select, input, button { width: 100%; box-sizing: border-box; padding: 12px; margin-bottom: 16px; border-radius: 10px; border: 1px solid #ddd; font-size: 15px; }
-    button { border: none; background: #111; color: white; cursor: pointer; }
-    .secondary { background: #eee; color: #111; }
-    .hint { font-size: 13px; color: #777; }
-    .mono { font-family: monospace; word-break: break-all; }
+    :root {
+      --primary: #3F826D;
+      --danger: #EF2356;
+      --secondary: #C7C6BC;
+      --bg: #F9F7F3;
+      --text: #323232;
+      --white: #F9F7F3;
+
+      --logo-size: 54px;
+      --logo-weight: 800;
+      --logo-letter-spacing: -8px;
+      --page-top-padding: 18px;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: "Oxanium", Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
+      padding: var(--page-top-padding) 22px 22px;
+    }
+
+    .app {
+      width: 100%;
+      max-width: 430px;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .logo {
+      text-align: center;
+      font-size: var(--logo-size);
+      font-weight: var(--logo-weight);
+      color: var(--primary);
+      margin: 0 0 6px;
+      letter-spacing: var(--logo-letter-spacing);
+      line-height: 0.95;
+    }
+
+    .card {
+      background: #fff;
+      border-radius: 10mm;
+      padding: 24px 24px 20px;
+      box-shadow: 0 18px 45px rgba(50, 50, 50, 0.12);
+      display: flex;
+      flex-direction: column;
+    }
+
+    .stepper { display: none; margin-bottom: 26px; }
+    .stepper.show { display: block; }
+
+    .step-labels {
+      display: flex;
+      justify-content: space-between;
+      font-size: 13px;
+      font-weight: 600;
+      margin-bottom: 10px;
+      color: rgba(50, 50, 50, 0.55);
+    }
+
+    .step-labels .active { color: var(--primary); }
+
+    .bar {
+      width: 100%;
+      height: 9px;
+      background: rgba(199, 198, 188, 0.55);
+      border-radius: 999px;
+      overflow: hidden;
+    }
+
+    .bar-fill {
+      height: 100%;
+      width: 50%;
+      background: var(--primary);
+      border-radius: 999px;
+      transition: width 0.25s ease;
+    }
+
+    .screen { display: none; flex: 1; }
+    .screen.active { display: flex; flex-direction: column; }
+
+    h1 {
+      font-size: 28px;
+      margin: 0 0 10px;
+      line-height: 1.15;
+    }
+
+    p {
+      margin: 0;
+      color: rgba(50, 50, 50, 0.72);
+      line-height: 1.45;
+      font-size: 15px;
+    }
+
+    .welcome-image {
+      width: 100%;
+      max-height: 255px;
+      object-fit: contain;
+      margin: 18px 0;
+      border-radius: 18px;
+    }
+
+    label {
+      display: block;
+      font-size: 14px;
+      font-weight: 700;
+      margin: 18px 0 8px;
+    }
+
+    select,
+    input {
+      width: 100%;
+      border: 2px solid rgba(50, 50, 50, 0.12);
+      border-radius: 10mm;
+      padding: 14px 16px;
+      font-family: "Oxanium", Arial, sans-serif;
+      font-size: 15px;
+      color: var(--text);
+      background: #fff;
+      outline: none;
+    }
+
+    select:focus,
+    input:focus { border-color: var(--primary); }
+
+    .field-error { border-color: var(--danger) !important; }
+
+    button {
+      width: 100%;
+      border: none;
+      border-radius: 10mm;
+      padding: 15px 18px;
+      font-family: "Oxanium", Arial, sans-serif;
+      font-size: 15px;
+      font-weight: 700;
+      cursor: pointer;
+      margin-top: 20px;
+    }
+
+    .primary {
+      background: var(--primary);
+      color: var(--white);
+    }
+
+    .secondary {
+      background: var(--secondary);
+      color: var(--text);
+      margin-top: 12px;
+    }
+
+    .message {
+      min-height: 24px;
+      margin-top: 14px;
+      font-size: 13px;
+      color: var(--danger);
+      font-weight: 600;
+    }
+
+    .connecting-box {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      text-align: center;
+      gap: 16px;
+    }
+
+    .loader {
+      width: 54px;
+      height: 54px;
+      border: 5px solid rgba(63, 130, 109, 0.18);
+      border-top-color: var(--primary);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
   </style>
 </head>
+
 <body>
-  <div class="card">
-    <h2>Grow Mate Wi-Fi Setup</h2>
-    <p>Connect this device to your home Wi-Fi.</p>
+  <main class="app">
+    <div class="logo">ARO</div>
 
-    <form id="wifiForm">
-      <label for="ssidSelect">Detected Wi-Fi networks</label>
-      <select id="ssidSelect">
-        <option value="">-- Select a network --</option>
-        {{WIFI_OPTIONS}}
-      </select>
+    <section class="card">
+      <div id="stepper" class="stepper">
+        <div class="step-labels">
+          <span id="wifiStepLabel" class="active">Wi-Fi Setup</span>
+          <span id="pairStepLabel">Pairing</span>
+        </div>
+        <div class="bar">
+          <div id="barFill" class="bar-fill"></div>
+        </div>
+      </div>
 
-      <label for="ssid">Wi-Fi name (SSID)</label>
-      <input id="ssid" name="ssid" placeholder="Enter SSID" required>
+      <div id="welcomeScreen" class="screen active">
+        <h1 style="text-align: center;">ARO G1</h1>
+        <p style="text-align: center;">Connect your device to Wi-Fi and pair it to your user.</p>
 
-      <label for="password">Wi-Fi password</label>
-      <input id="password" name="password" type="password" placeholder="Enter password">
+        <img
+          class="welcome-image"
+          src="https://cdn03.plentymarkets.com/ioseuwg7moqp/item/images/30131/full/Bambu-Lab-A1-PF002-A-EU-30131_2.png"
+          alt="ARO device preview"
+          onerror="this.style.display='none'"
+        >
 
-      <button type="submit">Connect</button>
-    </form>
+        <button class="primary" type="button" onclick="showWifi()">Get started</button>
+      </div>
 
-    <button class="secondary" onclick="window.location.href='/rescan'">Rescan Wi-Fi</button>
-    {{PAIR_BACK_BUTTON}}
+      <div id="wifiScreen" class="screen">
+        <h1>Connect Wi-Fi</h1>
+        <p>Choose your home network and enter the password.</p>
 
-    <p class="hint">Open in browser: <b>{{PORTAL_URL}}</b></p>
-    <p class="hint">Fallback address: <b>http://192.168.4.1</b></p>
-    <p class="hint">Device serial: <span class="mono">{{DEVICE_SERIAL}}</span></p>
-    <p id="message" class="hint"></p>
-  </div>
+        <form id="wifiForm">
+          <label for="ssidSelect">Detected Wi-Fi networks</label>
+          <select id="ssidSelect">
+            <option value="">Select a network</option>
+            {{WIFI_OPTIONS}}
+          </select>
+
+          <label for="password">Wi-Fi password</label>
+          <input id="password" name="password" type="password" placeholder="Enter password">
+
+          <p id="message" class="message"></p>
+
+          <button class="primary" type="submit">Next</button>
+        </form>
+
+        <button class="secondary" type="button" onclick="window.location.href='/rescan'">Rescan Wi-Fi</button>
+      </div>
+
+      <div id="connectingScreen" class="screen">
+        <div class="connecting-box">
+          <div class="loader"></div>
+          <h1>Connecting...</h1>
+          <p>Keep this page open while the G1 connects to your Wi-Fi.</p>
+        </div>
+      </div>
+    </section>
+  </main>
 
   <script>
-    const statusEl = document.getElementById('message');
+    const startStep = "{{START_STEP}}";
 
-    document.getElementById('ssidSelect').addEventListener('change', function () {
-      if (this.value) {
-        document.getElementById('ssid').value = this.value;
+    const stepper = document.getElementById("stepper");
+    const barFill = document.getElementById("barFill");
+    const wifiStepLabel = document.getElementById("wifiStepLabel");
+    const pairStepLabel = document.getElementById("pairStepLabel");
+
+    const welcomeScreen = document.getElementById("welcomeScreen");
+    const wifiScreen = document.getElementById("wifiScreen");
+    const connectingScreen = document.getElementById("connectingScreen");
+
+    const ssidSelect = document.getElementById("ssidSelect");
+    const passwordInput = document.getElementById("password");
+    const statusEl = document.getElementById("message");
+
+    let statusPollTimer = null;
+    let hardFailTimer = null;
+
+    function setScreen(screen) {
+      welcomeScreen.classList.remove("active");
+      wifiScreen.classList.remove("active");
+      connectingScreen.classList.remove("active");
+      screen.classList.add("active");
+    }
+
+    function showWifi() {
+      stepper.classList.add("show");
+      barFill.style.width = "50%";
+      wifiStepLabel.classList.add("active");
+      pairStepLabel.classList.remove("active");
+      setScreen(wifiScreen);
+    }
+
+    function showConnecting() {
+      stepper.classList.add("show");
+      barFill.style.width = "50%";
+      setScreen(connectingScreen);
+    }
+
+    function stopPolling() {
+      if (statusPollTimer) {
+        clearInterval(statusPollTimer);
+        statusPollTimer = null;
       }
-    });
 
-    document.getElementById('wifiForm').addEventListener('submit', async function (event) {
-      event.preventDefault();
-
-      const ssid = document.getElementById('ssid').value.trim();
-      const password = document.getElementById('password').value;
-
-      if (!ssid) {
-        statusEl.textContent = 'SSID is required.';
-        return;
+      if (hardFailTimer) {
+        clearTimeout(hardFailTimer);
+        hardFailTimer = null;
       }
+    }
 
-      statusEl.textContent = 'Saving Wi-Fi credentials and connecting...';
+    function markError() {
+      stopPolling();
+      showWifi();
+      ssidSelect.classList.add("field-error");
+      passwordInput.classList.add("field-error");
+      statusEl.textContent = "Could not connect. Check your Wi-Fi network and password.";
+    }
 
-      const params = new URLSearchParams();
-      params.set('ssid', ssid);
-      params.set('password', password);
+    function clearError() {
+      ssidSelect.classList.remove("field-error");
+      passwordInput.classList.remove("field-error");
+      statusEl.textContent = "";
+    }
 
-      const fallbackRedirect = setTimeout(() => {
-        window.location.href = '/pair';
-      }, 1500);
+    function goPair() {
+      stopPolling();
+      barFill.style.width = "100%";
+      wifiStepLabel.classList.remove("active");
+      pairStepLabel.classList.add("active");
+      window.location.href = "/pair";
+    }
 
+    async function pollConnectionStatus() {
       try {
-        const response = await fetch('/save', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: params.toString()
-        });
+        const res = await fetch("/status?ts=" + Date.now(), { cache: "no-store" });
+        if (!res.ok) return;
 
-        if (!response.ok) {
-          clearTimeout(fallbackRedirect);
-          statusEl.textContent = await response.text();
+        const data = await res.json();
+
+        if (data.wifiConnected === true || data.localIp) {
+          goPair();
           return;
         }
 
-        let data = {};
-        try {
-          data = await response.json();
-        } catch (_) {
-          // ignore JSON parse issues, fallback redirect will handle it
+        if (
+          data.connectInProgress === false &&
+          data.connectAttemptFinished === true &&
+          data.connectSucceeded === false
+        ) {
+          markError();
+        }
+      } catch (err) {
+        /* A missed status request is not automatically a Wi-Fi failure. */
+      }
+    }
+
+    ssidSelect.addEventListener("change", clearError);
+    passwordInput.addEventListener("input", clearError);
+
+    document.getElementById("wifiForm").addEventListener("submit", async function (event) {
+      event.preventDefault();
+
+      const ssid = ssidSelect.value.trim();
+      const password = passwordInput.value;
+
+      clearError();
+
+      if (!ssid) {
+        ssidSelect.classList.add("field-error");
+        statusEl.textContent = "Choose a Wi-Fi network.";
+        return;
+      }
+
+      showConnecting();
+
+      const params = new URLSearchParams();
+      params.set("ssid", ssid);
+      params.set("password", password);
+
+      try {
+        const response = await fetch("/save", {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: params.toString(),
+          cache: "no-store"
+        });
+
+        if (!response.ok) {
+          markError();
+          return;
         }
 
-        clearTimeout(fallbackRedirect);
-        window.location.href = data.portalUrl || data.redirectTo || '/pair';
-      } catch (error) {
-        statusEl.textContent = 'Wi-Fi is switching... opening pairing page...';
-        setTimeout(() => {
-          window.location.href = '/pair';
-        }, 500);
+        statusPollTimer = setInterval(pollConnectionStatus, 1000);
+
+        hardFailTimer = setTimeout(function () {
+          markError();
+        }, 26000);
+
+        pollConnectionStatus();
+      } catch (err) {
+        markError();
       }
     });
+
+    if (startStep === "wifi") {
+      showWifi();
+    }
   </script>
 </body>
 </html>
