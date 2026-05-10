@@ -9,11 +9,8 @@ String DEVICE_SERIAL_NUMBER = "";
 String ACTIVE_DEVICE_SECRET = "";
 String ACTIVE_DEVICE_AUTH_VERSION = "";
 
-// Burn this per-device secret into each board.
-// It should come from:
-// GET /api/devices/factory/generate-secret/<SERIAL>?version=v1
 
-const char* DEFAULT_DEVICE_SECRET = "3e2ecf8250264cb3674c1beb4ace7afb392a55b0d78d8f96d8f9e6136625ebe0";
+const char* DEFAULT_DEVICE_SECRET = "ad7f2a7dec25b39e81c98553fe176386b72104c8595860f75374a1121ce08d76";
 const char* DEFAULT_DEVICE_AUTH_VERSION = "v1";
 
 
@@ -33,7 +30,7 @@ const unsigned long WIFI_RETRY_DELAY_MS = 500;
 // ---------------------------
 // Backend
 // ---------------------------
-const char* API_BASE_URL =  "http://192.168.1.168:3000"; //"http://192.168.1.244:3000";
+const char* API_BASE_URL =  "https://grow-mate-node.onrender.com";
 const char* PAIRING_REQUEST_PATH = "/api/device-client/pairing/request";
 const char* HEARTBEAT_PATH = "/api/device-client/heartbeat";
 const char* TELEMETRY_PATH = "/api/device-client/data";
@@ -44,8 +41,8 @@ const char* DEVICE_RESET_PATH = "/api/device-client/reset";
 // ---------------------------
 // Timing
 // ---------------------------
-const unsigned long TELEMETRY_INTERVAL_MS = 30000;
-const unsigned long COMMAND_POLL_INTERVAL_MS = 15000;
+const unsigned long TELEMETRY_INTERVAL_MS = 300000; //5 minutes
+const unsigned long COMMAND_POLL_INTERVAL_MS = 60000; //1 minute
 const unsigned long PAIRING_CODE_REFRESH_INTERVAL_MS = 60000;
 const unsigned long HEARTBEAT_INTERVAL_MS = 60000;
 const unsigned long LOOP_IDLE_DELAY_MS = 2;

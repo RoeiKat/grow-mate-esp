@@ -5,6 +5,10 @@
 #include <Preferences.h>
 #include <WiFi.h>
 #include <math.h>
+#include <OneWire.h>
+#include <DallasTemperature.h>
+#include <BH1750.h>
+#include <Wire.h>
 #include "backend_client.h"
 #include "config.h"
 
@@ -24,6 +28,8 @@ struct TelemetryData {
   int waterLevelPercent;
   bool pumpActive;
   bool online;
+  float lightLux;
+  float roomTempC;
 };
 
 struct DeviceRuntimeState {
@@ -39,6 +45,13 @@ struct DeviceRuntimeState {
 };
 
 DeviceRuntimeState runtimeState;
+
+const int SOIL_MOISTURE_PIN = 34;
+OneWire oneWire(4);
+DallasTemperature sensors(&oneWire);
+OneWire oneWireRoom(17);
+DallasTemperature sensorsRoom(&oneWireRoom);
+BH1750 lightMeter;
 
 void loadStoredAuth() {
   prefs.begin(PREFS_NAMESPACE, true);
@@ -138,15 +151,42 @@ bool syncFactoryResetWithBackend() {
   return true;
 }
 
-struct TelemetryData readDummyTelemetry() {
-  const unsigned long seconds = millis() / 1000;
-
+struct TelemetryData readTelemetry() {
   TelemetryData data;
-  data.temperatureC = TEMPERATURE_BASE_C + sin(seconds / 13.0f) * TEMPERATURE_VARIATION_C;
+
+  // Read temperature from DS18B20
+  sensors.requestTemperatures();
+  data.temperatureC = sensors.getTempCByIndex(0);
+  Serial.print("[SENSORS] Temperature: ");
+  Serial.print(data.temperatureC);
+  Serial.println(" °C");
+
+  // Read room temperature from DS18B20 on GPIO14
+  sensorsRoom.requestTemperatures();
+  data.roomTempC = sensorsRoom.getTempCByIndex(0);
+  Serial.print("[SENSORS] Room Temperature: ");
+  Serial.print(data.roomTempC);
+  Serial.println(" °C");
+
+  // Read light from BH1750
+  data.lightLux = lightMeter.readLightLevel();
+  Serial.print("[SENSORS] Light: ");
+  Serial.print(data.lightLux);
+  Serial.println(" lux");
+
+  // Read soil moisture from analog pin GPIO34
+  int soilRaw = analogRead(SOIL_MOISTURE_PIN);
+  data.soilMoisturePercent = map(soilRaw, 0, 4095, 100, 0);
+  data.soilMoisturePercent = constrain(data.soilMoisturePercent, 0, 100);
+  Serial.print("[SENSORS] Soil raw: ");
+  Serial.print(soilRaw);
+  Serial.print(" | moisture: ");
+  Serial.print(data.soilMoisturePercent);
+  Serial.println(" %");
+
+  // Dummy data for other sensors (not connected yet)
+  const unsigned long seconds = millis() / 1000;
   data.humidityPercent = HUMIDITY_BASE_PERCENT + cos(seconds / 17.0f) * HUMIDITY_VARIATION_PERCENT;
-  data.soilMoisturePercent = constrain(
-    SOIL_MOISTURE_BASE_PERCENT + (int)(sin(seconds / 11.0f) * SOIL_MOISTURE_VARIATION_PERCENT), 0, 100
-  );
   data.waterLevelPercent = constrain(
     WATER_LEVEL_BASE_PERCENT + (int)(cos(seconds / 19.0f) * WATER_LEVEL_VARIATION_PERCENT), 0, 100
   );
@@ -298,15 +338,17 @@ bool sendTelemetry() {
   if (WiFi.status() != WL_CONNECTED) return false;
   if (!runtimeState.isPaired) return false;
 
-  TelemetryData telemetry = readDummyTelemetry();
+  TelemetryData telemetry = readTelemetry();
 
   JsonDocument body;
   body["temperatureC"] = telemetry.temperatureC;
-  body["humidityPercent"] = telemetry.humidityPercent;
+  // body["humidityPercent"] = telemetry.humidityPercent;
   body["soilMoisturePercent"] = telemetry.soilMoisturePercent;
-  body["waterLevelPercent"] = telemetry.waterLevelPercent;
-  body["pumpActive"] = telemetry.pumpActive;
+  // body["waterLevelPercent"] = telemetry.waterLevelPercent;
+  // body["pumpActive"] = telemetry.pumpActive;
   body["online"] = telemetry.online;
+  body["lightLux"] = telemetry.lightLux;
+  body["roomTempC"] = telemetry.roomTempC;
 
   String payload;
   serializeJson(body, payload);
@@ -618,6 +660,12 @@ void begin() {
   loadStoredAuth();
   loadFactoryResetPendingFlag();
   printIdentity();
+
+  pinMode(SOIL_MOISTURE_PIN, INPUT);
+  Wire.begin(21, 22);
+  sensors.begin();
+  sensorsRoom.begin();
+  lightMeter.begin();
 
   if (runtimeState.factoryResetPending) {
     Serial.println("[RESET_SYNC] Factory reset is pending and will sync after Wi-Fi connects.");
